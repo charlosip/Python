@@ -1,0 +1,188 @@
+Tools: Python (pandas) · Tableau
+Data: Louisiana Department of Education — LEAP 2025 & ACT Class of 2025
+
+Cleaned and merged two raw LDOE Excel files covering 87 Orleans Parish schools. Identified a 0.7-point ACT gap between Orleans Parish and the state average and tracked year-over-year LEAP mastery changes. Exported four analysis-ready CSVs that power a multi-page interactive Tableau dashboard.
+Key skills: Excel file ingestion, handling suppressed government data, multi-dataset merging, CSV export for Tableau
+Tableau Dashboard https://public.tableau.com/app/profile/charlo.siprien/viz/NewOrleans_25_Perform/Overview
+Here's the code i used below:
+
+import pandas as pd
+
+
+leap_raw = pd.read_excel(
+    '2025-school-leap-2025-mastery-summary.xlsx',
+    sheet_name='All Subjects',
+    skiprows=2
+)
+
+act_school_raw = pd.read_excel(
+    'act-class-of-2025.xlsx',
+    sheet_name='School',
+    skiprows=2
+)
+
+act_district_raw = pd.read_excel(
+    'act-class-of-2025.xlsx',
+    sheet_name='District',
+    skiprows=2
+)
+
+
+leap_raw.columns = [
+    'sys_code',           # School system code (e.g. R36)
+    'sys_name',           # School system name (e.g. Orleans Parish)
+    'site_code',          # Individual school code
+    'site_name',          # Individual school name
+    'mastery_2024_38',    # 2024 mastery % for grades 3-8
+    'mastery_2025_38',    # 2025 mastery % for grades 3-8
+    'change_38',          # Year over year change for grades 3-8
+    'mastery_2024_all',   # 2024 mastery % for all grades
+    'mastery_2025_all',   # 2025 mastery % for all grades
+    'change_all'          # Year over year change for all grades
+]
+
+act_school_raw.columns = [
+    'sys_code',           # School system code
+    'sys_name',           # School system name
+    'site_code',          # Individual school code
+    'site_name',          # Individual school name
+    'student_count',      # Number of seniors who took the ACT
+    'avg_act'             # Average ACT composite score
+]
+
+act_district_raw.columns = [
+    'sys_code',           # District code
+    'sys_name',           # District/parish name
+    'student_count',      # Number of seniors who took the ACT
+    'avg_act'             # Average ACT composite score
+]
+
+
+
+orleans_leap = leap_raw[
+    leap_raw['sys_name'].str.contains('Orleans', na=False)
+].copy()  # .copy() makes a fresh copy so we don't accidentally
+          # edit the original raw data
+
+orleans_act = act_school_raw[
+    act_school_raw['sys_name'].str.contains('Orleans', na=False)
+].copy()
+
+
+numeric_cols_leap = [
+    'mastery_2024_all', 'mastery_2025_all', 'change_all',
+    'mastery_2024_38', 'mastery_2025_38', 'change_38'
+]
+for col in numeric_cols_leap:
+    orleans_leap[col] = pd.to_numeric(orleans_leap[col], errors='coerce')
+
+orleans_act['avg_act'] = pd.to_numeric(orleans_act['avg_act'], errors='coerce')
+orleans_act['student_count'] = pd.to_numeric(orleans_act['student_count'], errors='coerce')
+
+act_district_raw['avg_act'] = pd.to_numeric(act_district_raw['avg_act'], errors='coerce')
+act_district_raw['student_count'] = pd.to_numeric(act_district_raw['student_count'], errors='coerce')
+
+
+
+orleans_leap = orleans_leap[orleans_leap['mastery_2025_all'].notna()]
+orleans_act = orleans_act[orleans_act['avg_act'].notna()]
+
+
+
+file1 = orleans_leap[[
+    'sys_name', 'site_code', 'site_name',
+    'mastery_2024_38', 'mastery_2025_38', 'change_38',
+    'mastery_2024_all', 'mastery_2025_all', 'change_all'
+]].copy()
+
+
+file1 = file1.rename(columns={
+    'sys_name':          'Parish',
+    'site_code':         'Site Code',
+    'site_name':         'School Name',
+    'mastery_2024_38':   'LEAP Mastery 2024 Gr3-8 (%)',
+    'mastery_2025_38':   'LEAP Mastery 2025 Gr3-8 (%)',
+    'change_38':         'Year over Year Change Gr3-8 (pts)',
+    'mastery_2024_all':  'LEAP Mastery 2024 (%)',
+    'mastery_2025_all':  'LEAP Mastery 2025 (%)',
+    'change_all':        'Year over Year Change (pts)'
+})
+
+file1['Parish'] = 'Orleans Parish'
+
+
+file1.to_csv('01_Orleans_LEAP_2025.csv', index=False)
+
+
+file2 = orleans_act[[
+    'sys_name', 'site_code', 'site_name',
+    'student_count', 'avg_act'
+]].copy()
+
+file2 = file2.rename(columns={
+    'sys_name':      'Parish',
+    'site_code':     'Site Code',
+    'site_name':     'School Name',
+    'student_count': 'Senior Count',
+    'avg_act':       'ACT Average Composite'
+})
+
+
+file2['State ACT Average'] = 18.4
+file2['Orleans Parish ACT Average'] = 17.7
+
+file2.to_csv('02_Orleans_ACT_2025.csv', index=False)
+
+
+
+
+leap_for_merge = orleans_leap[[
+    'site_code', 'site_name',
+    'mastery_2024_all', 'mastery_2025_all', 'change_all'
+]].rename(columns={
+    'site_name':         'School Name',
+    'mastery_2024_all':  'LEAP Mastery 2024 (%)',
+    'mastery_2025_all':  'LEAP Mastery 2025 (%)',
+    'change_all':        'Year over Year Change (pts)'
+})
+
+act_for_merge = orleans_act[[
+    'site_code', 'student_count', 'avg_act'
+]].rename(columns={
+    'student_count': 'Senior Count',
+    'avg_act':       'ACT Average Composite'
+})
+
+file3 = pd.merge(leap_for_merge, act_for_merge, on='site_code', how='inner')
+
+file3 = file3.dropna(subset=['LEAP Mastery 2025 (%)', 'ACT Average Composite'])
+
+file3['State ACT Average'] = 18.4
+file3['Orleans Parish ACT Average'] = 17.7
+
+file3.to_csv('03_Orleans_LEAP_ACT_Merged.csv', index=False)
+print(f"  Saved: 03_Orleans_LEAP_ACT_Merged.csv ({len(file3)} schools)")
+
+file4 = act_district_raw[
+    act_district_raw['sys_code'] != 'LA'
+].copy()
+
+file4 = file4.dropna(subset=['avg_act'])
+
+file4 = file4.rename(columns={
+    'sys_code':      'District Code',
+    'sys_name':      'Parish / District',
+    'student_count': 'Senior Count',
+    'avg_act':       'ACT Average Composite'
+})
+
+file4['State ACT Average'] = 18.4
+file4['Orleans Parish ACT Average'] = 17.7
+
+file4['Is Orleans'] = file4['Parish / District'].str.contains(
+    'Orleans', na=False
+).map({True: 'Orleans Parish', False: 'Other Parish'})
+
+file4.to_csv('04_Louisiana_All_Parishes_ACT.csv', index=False)
+print(f"  Saved: 04_Louisiana_All_Parishes_ACT.csv ({len(file4)} parishes)")
+
